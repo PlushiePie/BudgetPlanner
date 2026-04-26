@@ -324,3 +324,49 @@ class BudgetApp : JFrame()
 
         add(mainPanel)
     }
+
+    private fun showSetMonthlyBudgetDialog()
+    {
+        val dialog = JDialog(this, "💰 Установить бюджет на месяц", true)
+        dialog.setSize(350, 180)
+        dialog.setLocationRelativeTo(this)
+        dialog.layout = BorderLayout()
+
+        val panel = JPanel().apply {
+            layout = GridLayout(3, 1, 10, 10)
+            border = EmptyBorder(20, 20, 20, 20)
+        }
+
+        val currentTotal = manager.getTotalBudget()
+        panel.add(JLabel("💰 Текущий общий бюджет: ${String.format("%.2f", currentTotal)} ₽"))
+        panel.add(JLabel("📝 Новый бюджет на месяц (₽):"))
+
+        val budgetField = JTextField()
+        panel.add(budgetField)
+
+        val buttonPanel = JPanel()
+        val saveButton = JButton("💾 Сохранить")
+        val cancelButton = JButton("❌ Отмена")
+
+        saveButton.addActionListener {
+            val newBudget = budgetField.text.toDoubleOrNull()
+            if (newBudget != null && newBudget > 0)
+            {
+                manager.setMonthlyBudget(newBudget)
+                refreshAll()
+                dialog.dispose()
+                JOptionPane.showMessageDialog(this, "Бюджет обновлён! Категории пересчитаны пропорционально.")
+            } else {
+                JOptionPane.showMessageDialog(dialog, "Введите корректную сумму > 0", "Ошибка", JOptionPane.ERROR_MESSAGE)
+            }
+        }
+
+        cancelButton.addActionListener { dialog.dispose() }
+
+        buttonPanel.add(saveButton)
+        buttonPanel.add(cancelButton)
+
+        dialog.add(panel, BorderLayout.CENTER)
+        dialog.add(buttonPanel, BorderLayout.SOUTH)
+        dialog.isVisible = true
+    }
