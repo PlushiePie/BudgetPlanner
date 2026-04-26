@@ -105,3 +105,32 @@ class BudgetManager : Serializable
             saveToFile()
         }
     }
+
+    fun setMonthlyBudget(totalAmount: Double)
+    {
+        if (totalAmount <= 0) return
+        val currentTotal = getTotalBudget()
+        if (currentTotal == 0.0) return
+
+        val remainingCategories = _categories.toMutableList()
+        var remainingBudget = totalAmount
+
+        for (i in _categories.indices)
+        {
+            val proportion = _categories[i].budget / currentTotal
+            var newBudget = totalAmount * proportion
+
+            // Для последней категории ставим остаток, чтобы избежать погрешности
+            if (i == _categories.size - 1)
+            {
+                newBudget = remainingBudget
+            }
+
+            _categories[i] = _categories[i].copy(budget = newBudget)
+            remainingBudget -= newBudget
+        }
+        saveToFile()
+    }
+
+    fun getTotalBudget(): Double = _categories.sumOf { it.budget }
+    fun getTotalSpent(): Double = _categories.sumOf { it.spent }
