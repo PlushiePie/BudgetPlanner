@@ -207,3 +207,120 @@ data class BudgetSaveData(
     val categories: List<Category>,
     val transactions: List<Transaction>
 ) : Serializable
+
+class BudgetApp : JFrame()
+{
+    private val manager = BudgetManager()
+    private val dateFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy")
+
+    private val categoryPanel = JPanel().apply {
+        layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        border = EmptyBorder(10, 10, 10, 10)
+    }
+
+    private val recentListModel = DefaultListModel<String>()
+    private val recentList = JList(recentListModel).apply {
+        font = Font("Monospaced", Font.PLAIN, 12)
+        fixedCellHeight = 35
+    }
+
+    private val pieChartPlaceholder = JLabel(
+        "[ЗАГЛУШКА] Здесь будет круговая диаграмма\nРазмер сегментов = потрачено / бюджет",
+        SwingConstants.CENTER
+    ).apply {
+        border = BorderFactory.createDashedBorder(Color.GRAY)
+        background = Color(240, 240, 240)
+        isOpaque = true
+        preferredSize = Dimension(400, 120)
+    }
+
+    init
+    {
+        title = "Планировщик трат — Бюджетирование"
+        defaultCloseOperation = EXIT_ON_CLOSE
+        setSize(650, 750)
+        setLocationRelativeTo(null)
+
+        setupUI()
+        refreshAll()
+    }
+
+    private fun setupUI()
+    {
+        val mainPanel = JPanel(BorderLayout())
+        mainPanel.add(pieChartPlaceholder, BorderLayout.NORTH)
+
+        val scrollCategories = JScrollPane(categoryPanel).apply {
+            border = BorderFactory.createTitledBorder("Категории бюджета")
+        }
+        mainPanel.add(scrollCategories, BorderLayout.CENTER)
+
+        val recentPanel = JPanel(BorderLayout()).apply {
+            border = BorderFactory.createTitledBorder("🕒 Последние траты (правый клик - удалить/отметить)")
+            add(JScrollPane(recentList), BorderLayout.CENTER)
+            preferredSize = Dimension(400, 200)
+        }
+
+        recentList.addMouseListener(object : java.awt.event.MouseAdapter()
+        {
+            override fun mouseClicked(e: java.awt.event.MouseEvent)
+            {
+                if (e.button == java.awt.event.MouseEvent.BUTTON3)
+                {
+                    val index = recentList.locationToIndex(e.point)
+                    if (index != -1)
+                    {
+                        showTransactionContextMenu(index, e.x, e.y)
+                    }
+                }
+            }
+        })
+
+        mainPanel.add(recentPanel, BorderLayout.SOUTH)
+
+        // Меню
+        val menuBar = JMenuBar()
+        val actionsMenu = JMenu("📋 Действия")
+
+        val addItem = JMenuItem("➕ Добавить трату")
+        addItem.addActionListener { showAddDialog() }
+
+        val viewAllItem = JMenuItem("📜 Просмотреть все траты")
+        viewAllItem.addActionListener { showAllTransactionsDialog() }
+
+        val editBudgetItem = JMenuItem("✏️ Редактировать бюджеты категорий")
+        editBudgetItem.addActionListener { showEditBudgetDialog() }
+
+        val setMonthlyBudgetItem = JMenuItem("💰 Установить бюджет на месяц")
+        setMonthlyBudgetItem.addActionListener { showSetMonthlyBudgetDialog() }
+
+        val analyticsItem = JMenuItem("📈 Прогнозы и аналитика")
+        analyticsItem.addActionListener { showAnalyticsDialog() }
+
+        val exitItem = JMenuItem("🚪 Выход")
+        exitItem.addActionListener { dispose() }
+
+        actionsMenu.add(addItem)
+        actionsMenu.add(viewAllItem)
+        actionsMenu.add(editBudgetItem)
+        actionsMenu.add(setMonthlyBudgetItem)
+        actionsMenu.addSeparator()
+        actionsMenu.add(analyticsItem)
+        actionsMenu.addSeparator()
+        actionsMenu.add(exitItem)
+
+        val helpMenu = JMenu("❓ Справка")
+        val aboutItem = JMenuItem("О программе")
+        aboutItem.addActionListener {
+            JOptionPane.showMessageDialog(this,
+                "Планировщик трат\nВерсия 2.0\n\nФункции:\n- Добавление трат\n- Просмотр всех трат\n- Удаление трат\n- Отметка выполненных\n- Установка бюджета на месяц\n- Прогнозы и аналитика\n- Автосохранение",
+                "О программе", JOptionPane.INFORMATION_MESSAGE)
+        }
+        helpMenu.add(aboutItem)
+
+        menuBar.add(actionsMenu)
+        menuBar.add(helpMenu)
+        setJMenuBar(menuBar)
+
+        add(mainPanel)
+    }
