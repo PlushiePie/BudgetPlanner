@@ -500,3 +500,288 @@ class BudgetApp : JFrame()
         dialog.add(closeButton, BorderLayout.SOUTH)
         dialog.isVisible = true
     }
+
+    //контекстное меню для трат
+    private fun showTransactionContextMenu(index: Int, x: Int, y: Int)
+    {
+        val popup = JPopupMenu()
+
+        val deleteItem = JMenuItem("🗑️ Удалить трату")
+        deleteItem.addActionListener {
+            manager.deleteTransaction(index)
+            refreshAll()
+        }
+
+        val completeItem = JMenuItem("✅ Отметить как выполненную")
+        completeItem.addActionListener {
+            manager.markTransactionCompleted(index)
+            refreshAll()
+        }
+
+        popup.add(deleteItem)
+        popup.add(completeItem)
+        popup.show(recentList, x, y)
+    }
+
+    private fun showAllTransactionsDialog()
+    {
+        val dialog = JDialog(this, "📜 Все траты", true)
+        dialog.setSize(600, 500)
+        dialog.setLocationRelativeTo(this)
+
+        val model = DefaultListModel<String>()
+        val list = JList(model)
+        list.font = Font("Monospaced", Font.PLAIN, 12)
+        list.fixedCellHeight = 35
+
+        for ((idx, t) in manager.transactions.withIndex())
+        {
+            val status = if (t.isCompleted) "✅" else "⏳"
+            val commentStr = if (t.comment.isNotEmpty()) " | ${t.comment}" else ""
+            val dateStr = t.date.format(dateFormatter)
+            model.addElement("$status ${t.amount.toInt()} ₽ | ${t.category} | $dateStr$commentStr")
+        }
+
+        list.addMouseListener(object : java.awt.event.MouseAdapter()
+        {
+            override fun mouseClicked(e: java.awt.event.MouseEvent)
+            {
+                if (e.button == java.awt.event.MouseEvent.BUTTON3)
+                {
+                    val idx = list.locationToIndex(e.point)
+                    if (idx != -1)
+                    {
+                        val popup = JPopupMenu()
+                        val deleteItem = JMenuItem("🗑️ Удалить")
+                        deleteItem.addActionListener {
+                            manager.deleteTransaction(idx)
+                            dialog.dispose()
+                            showAllTransactionsDialog()
+                            refreshAll()
+                        }
+                        popup.add(deleteItem)
+                        popup.show(list, e.x, e.y)
+                    }
+                }
+            }
+        })
+
+        val scrollPane = JScrollPane(list)
+        dialog.add(scrollPane)
+
+        val closeButton = JButton("Закрыть")
+        closeButton.addActionListener { dialog.dispose() }
+        dialog.add(closeButton, BorderLayout.SOUTH)
+
+        dialog.isVisible = true
+    }
+
+    private fun showEditBudgetDialog() {
+        val dialog = JDialog(this, "✏️ Редактировать бюджеты категорий", true)
+        dialog.setSize(400, 400)
+        dialog.setLocationRelativeTo(this)
+        dialog.layout = BorderLayout()
+
+        val panel = JPanel().apply {
+            layout = GridLayout(manager.categories.size, 2, 10, 10)
+            border = EmptyBorder(20, 20, 20, 20)
+        }
+
+        val budgetFields = mutableMapOf<String, JTextField>()
+
+        for (cat in manager.categories)
+        {
+            panel.add(JLabel("${cat.icon} ${cat.name}:"))
+            val field = JTextField(cat.budget.toInt().toString())
+            budgetFields[cat.name] = field
+            panel.add(field)
+        }
+
+        val saveButton = JButton("💾 Сохранить")
+        saveButton.addActionListener {
+            for ((name, field) in budgetFields)
+            {
+                val newBudget = field.text.toDoubleOrNull()
+                if (newBudget != null && newBudget > 0)
+                {
+                    manager.updateBudget(name, newBudget)
+                }
+            }
+            refreshAll()
+            dialog.dispose()
+            JOptionPane.showMessageDialog(this, "Бюджеты обновлены")
+        }
+
+        dialog.add(panel, BorderLayout.CENTER)
+        dialog.add(saveButton, BorderLayout.SOUTH)
+        dialog.isVisible = true
+    }
+
+    private fun refreshAll()
+    {
+        refreshCategories()
+        refreshRecentTransactions()
+    }
+
+    private fun refreshCategories()
+    {
+        categoryPanel.removeAll()
+
+        for (category in manager.categories)
+        {
+            val card = createCategoryCard(category)
+            categoryPanel.add(card)
+            categoryPanel.add(Box.createVerticalStrut(10))
+        }
+
+        val totalBudget = manager.getTotalBudget()
+        val totalSpent = manager.getTotalSpent()
+        val totalPercent = if (totalBudget > 0) ((totalSpent / totalBudget) * 100).toInt() else 0
+
+        val totalCard = JPanel().apply {
+            layout = BorderLayout()
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Color.GRAY),
+                EmptyBorder(10, 10, 10, 10)
+            )
+            background = Color(230, 240, 255)
+        }
+
+        totalCard.add(JLabel("📌 ИТОГО: ${totalSpent.toInt()} ₽ из ${totalBudget.toInt()} ₽"), BorderLayout.WEST)
+        totalCard.add(JLabel("$totalPercent%"), BorderLayout.EAST)
+
+        categoryPanel.add(totalCard)
+        categoryPanel.revalidate()
+        categoryPanel.repaint()
+    }
+
+    private fun createCategoryCard(category: Category): JPanel
+    {
+        val percent = if (category.budget > 0) ((category.spent / category.budget) * 100).coerceAtMost(100.0).toInt() else 0
+
+        val progressColor = when
+        {
+            category.spent > category.budget -> Color.RED
+            category.spent > category.budget * 0.8 -> Color.ORANGE
+            else -> Color.GREEN
+        }
+
+        val progressBar = JProgressBar(0, 100).apply {
+            value = percent
+            background = Color.LIGHT_GRAY
+            foreground = progressColor
+            preferredSize = Dimension(200, 20)
+        }
+
+        val panel = JPanel(BorderLayout()).apply {
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Color.LIGHT_GRAY),
+                EmptyBorder(10, 10, 10, 10)
+            )
+        }
+
+        val topPanel = JPanel(BorderLayout())
+        topPanel.add(JLabel("${category.icon} ${category.name}"), BorderLayout.WEST)
+        topPanel.add(JLabel("${category.spent.toInt()} / ${category.budget.toInt()} ₽"), BorderLayout.EAST)
+
+        panel.add(topPanel, BorderLayout.NORTH)
+        panel.add(progressBar, BorderLayout.CENTER)
+
+        return panel
+    }
+
+    private fun refreshRecentTransactions()
+    {
+        recentListModel.clear()
+        for (t in manager.transactions.take(5))
+        {
+            val status = if (t.isCompleted) "✅" else "⏳"
+            val commentStr = if (t.comment.isNotEmpty()) " | ${t.comment}" else ""
+            recentListModel.addElement("$status ${t.amount.toInt()} ₽ | ${t.category} | ${t.date.format(dateFormatter)}$commentStr")
+        }
+        if (manager.transactions.isEmpty())
+        {
+            recentListModel.addElement("Нет добавленных трат. Нажмите 'Добавить трату' в меню")
+        }
+    }
+
+    private fun showAddDialog()
+    {
+        val dialog = JDialog(this, "➕ Добавить трату", true)
+        dialog.setSize(350, 400)
+        dialog.setLocationRelativeTo(this)
+        dialog.layout = BorderLayout()
+
+        val fieldsPanel = JPanel().apply {
+            layout = GridLayout(0, 2, 10, 10)
+            border = EmptyBorder(20, 20, 20, 20)
+        }
+
+        val amountField = JTextField()
+        val categoryCombo = JComboBox(manager.categories.map { it.name }.toTypedArray())
+        val commentField = JTextField()
+        val dateField = JTextField(LocalDate.now().format(dateFormatter))
+
+        fieldsPanel.add(JLabel("💰 Сумма (₽):"))
+        fieldsPanel.add(amountField)
+        fieldsPanel.add(JLabel("📂 Категория:"))
+        fieldsPanel.add(categoryCombo)
+        fieldsPanel.add(JLabel("📝 Комментарий (опционально):"))
+        fieldsPanel.add(commentField)
+        fieldsPanel.add(JLabel("📅 Дата (ДД.ММ.ГГГГ):"))
+        fieldsPanel.add(dateField)
+
+        val buttonPanel = JPanel().apply {
+            border = EmptyBorder(0, 20, 20, 20)
+        }
+
+        val saveButton = JButton("💾 Сохранить")
+        val cancelButton = JButton("❌ Отмена")
+
+        saveButton.addActionListener {
+            try
+            {
+                val amount = amountField.text.toDoubleOrNull()
+                if (amount == null || amount <= 0)
+                {
+                    JOptionPane.showMessageDialog(dialog, "Введите корректную сумму > 0", "Ошибка", JOptionPane.ERROR_MESSAGE)
+                    return@addActionListener
+                }
+
+                val category = categoryCombo.selectedItem as String
+                val comment = commentField.text
+                val date = try
+                {
+                    LocalDate.parse(dateField.text, dateFormatter)
+                } catch (e: Exception)
+                {
+                    LocalDate.now()
+                }
+
+                manager.addTransaction(amount, category, comment, date)
+                refreshAll()
+                dialog.dispose()
+
+            } catch (e: Exception)
+            {
+                JOptionPane.showMessageDialog(dialog, "Ошибка: ${e.message}", "Ошибка", JOptionPane.ERROR_MESSAGE)
+            }
+        }
+
+        cancelButton.addActionListener { dialog.dispose() }
+
+        buttonPanel.add(saveButton)
+        buttonPanel.add(cancelButton)
+
+        dialog.add(fieldsPanel, BorderLayout.CENTER)
+        dialog.add(buttonPanel, BorderLayout.SOUTH)
+        dialog.isVisible = true
+    }
+}
+
+fun main()
+{
+    SwingUtilities.invokeLater {
+        BudgetApp().isVisible = true
+    }
+}
