@@ -3,6 +3,7 @@ import java.awt.Color
 import java.awt.Dimension
 import java.awt.Font
 import java.awt.GridLayout
+import java.awt.FlowLayout
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -245,6 +246,38 @@ class BudgetApp : JFrame()
         refreshAll()
     }
 
+    // умный ввод суммы (1.5к → 1500, 2т → 2000)
+    private fun parseAmount(input: String): Double
+    {
+        val trimmed = input.trim().lowercase()
+        return when {
+            trimmed.endsWith("к") -> trimmed.dropLast(1).toDoubleOrNull()?.times(1000) ?: 0.0
+            trimmed.endsWith("т") -> trimmed.dropLast(1).toDoubleOrNull()?.times(1000) ?: 0.0
+            else -> trimmed.toDoubleOrNull() ?: 0.0
+        }
+    }
+
+    // экспорт в CSV
+    private fun exportToCSV()
+    {
+        if (manager.transactions.isEmpty())
+        {
+            JOptionPane.showMessageDialog(this, "Нет трат для экспорта", "Ошибка", JOptionPane.WARNING_MESSAGE)
+            return
+        }
+        val fileName = "отчёт_${LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"))}.csv"
+        val file = File(fileName)
+
+        java.io.PrintWriter(java.io.OutputStreamWriter(java.io.FileOutputStream(file), "UTF-8")).use { out ->
+            out.print('\uFEFF')
+            out.println("Дата;Категория;Сумма;Комментарий;Статус")
+            for (t in manager.transactions) {
+                out.println("${t.date};${t.category};${t.amount};${t.comment};${if(t.isCompleted)"Выполнено" else "Ожидает"}")
+            }
+        }
+        JOptionPane.showMessageDialog(this, "Отчёт сохранён в ${file.absolutePath}")
+    }
+
     private fun setupUI()
     {
         val mainPanel = JPanel(BorderLayout())
@@ -297,6 +330,10 @@ class BudgetApp : JFrame()
         val analyticsItem = JMenuItem("📈 Прогнозы и аналитика")
         analyticsItem.addActionListener { showAnalyticsDialog() }
 
+        // пункт меню для экспорта в CSV
+        val exportItem = JMenuItem("📤 Экспорт отчёта в CSV")
+        exportItem.addActionListener { exportToCSV() }
+
         val exitItem = JMenuItem("🚪 Выход")
         exitItem.addActionListener { dispose() }
 
@@ -306,6 +343,7 @@ class BudgetApp : JFrame()
         actionsMenu.add(setMonthlyBudgetItem)
         actionsMenu.addSeparator()
         actionsMenu.add(analyticsItem)
+        actionsMenu.add(exportItem)
         actionsMenu.addSeparator()
         actionsMenu.add(exitItem)
 
@@ -313,7 +351,7 @@ class BudgetApp : JFrame()
         val aboutItem = JMenuItem("О программе")
         aboutItem.addActionListener {
             JOptionPane.showMessageDialog(this,
-                "Планировщик трат\nВерсия 2.0\n\nФункции:\n- Добавление трат\n- Просмотр всех трат\n- Удаление трат\n- Отметка выполненных\n- Установка бюджета на месяц\n- Прогнозы и аналитика\n- Автосохранение",
+                "Планировщик трат\nВерсия 2.0\n\nФункции:\n- Добавление трат\n- Просмотр всех трат\n- Удаление трат\n- Отметка выполненных\n- Установка бюджета на месяц\n- Прогнозы и аналитика\n- Экспорт в CSV\n- Фильтр по дате\n- Умный ввод суммы\n- Автосохранение",
                 "О программе", JOptionPane.INFORMATION_MESSAGE)
         }
         helpMenu.add(aboutItem)
@@ -523,24 +561,48 @@ class BudgetApp : JFrame()
         popup.show(recentList, x, y)
     }
 
+    // фильтр по дате в диалоге "Все траты"
     private fun showAllTransactionsDialog()
     {
         val dialog = JDialog(this, "📜 Все траты", true)
-        dialog.setSize(600, 500)
+        dialog.setSize(650, 550)
         dialog.setLocationRelativeTo(this)
+        dialog.layout = BorderLayout()
+
+        // Панель фильтров
+        val filterPanel = JPanel().apply {
+            layout = FlowLayout(FlowLayout.LEFT)
+            border = EmptyBorder(10, 10, 5, 10)
+        }
+
+        filterPanel.add(JLabel("Фильтр по дате:"))
+        val filterCombo = JComboBox(arrayOf("За всё время", "За неделю", "За месяц", "За год"))
+        filterPanel.add(filterCombo)
 
         val model = DefaultListModel<String>()
         val list = JList(model)
         list.font = Font("Monospaced", Font.PLAIN, 12)
         list.fixedCellHeight = 35
 
-        for ((idx, t) in manager.transactions.withIndex())
-        {
-            val status = if (t.isCompleted) "✅" else "⏳"
-            val commentStr = if (t.comment.isNotEmpty()) " | ${t.comment}" else ""
-            val dateStr = t.date.format(dateFormatter)
-            model.addElement("$status ${t.amount.toInt()} ₽ | ${t.category} | $dateStr$commentStr")
+        fun updateList() {
+            model.clear()
+            val now = LocalDate.now()
+            val filtered = when (filterCombo.selectedIndex) {
+                1 -> manager.transactions.filter { it.date >= now.minusWeeks(1) }
+                2 -> manager.transactions.filter { it.date >= now.minusMonths(1) }
+                3 -> manager.transactions.filter { it.date >= now.minusYears(1) }
+                else -> manager.transactions
+            }
+            for ((idx, t) in filtered.withIndex()) {
+                val status = if (t.isCompleted) "✅" else "⏳"
+                val commentStr = if (t.comment.isNotEmpty()) " | ${t.comment}" else ""
+                val dateStr = t.date.format(dateFormatter)
+                model.addElement("$status ${t.amount.toInt()} ₽ | ${t.category} | $dateStr$commentStr")
+            }
         }
+
+        filterCombo.addActionListener { updateList() }
+        updateList()
 
         list.addMouseListener(object : java.awt.event.MouseAdapter()
         {
@@ -554,10 +616,22 @@ class BudgetApp : JFrame()
                         val popup = JPopupMenu()
                         val deleteItem = JMenuItem("🗑️ Удалить")
                         deleteItem.addActionListener {
-                            manager.deleteTransaction(idx)
+                            // Нужно найти реальный индекс в оригинальном списке
+                            val now = LocalDate.now()
+                            val filtered = when (filterCombo.selectedIndex) {
+                                1 -> manager.transactions.filter { it.date >= now.minusWeeks(1) }
+                                2 -> manager.transactions.filter { it.date >= now.minusMonths(1) }
+                                3 -> manager.transactions.filter { it.date >= now.minusYears(1) }
+                                else -> manager.transactions
+                            }
+                            val realIndex = manager.transactions.indexOf(filtered[idx])
+                            if (realIndex != -1) {
+                                manager.deleteTransaction(realIndex)
+                                updateList()
+                                refreshAll()
+                            }
                             dialog.dispose()
                             showAllTransactionsDialog()
-                            refreshAll()
                         }
                         popup.add(deleteItem)
                         popup.show(list, e.x, e.y)
@@ -567,7 +641,8 @@ class BudgetApp : JFrame()
         })
 
         val scrollPane = JScrollPane(list)
-        dialog.add(scrollPane)
+        dialog.add(filterPanel, BorderLayout.NORTH)
+        dialog.add(scrollPane, BorderLayout.CENTER)
 
         val closeButton = JButton("Закрыть")
         closeButton.addActionListener { dialog.dispose() }
@@ -705,6 +780,7 @@ class BudgetApp : JFrame()
         }
     }
 
+    // умный ввод суммы используется в диалоге добавления
     private fun showAddDialog()
     {
         val dialog = JDialog(this, "➕ Добавить трату", true)
@@ -718,6 +794,7 @@ class BudgetApp : JFrame()
         }
 
         val amountField = JTextField()
+        amountField.toolTipText = "Можно писать: 1500, 1.5к, 2т (к = тысячи)"  // ДОБАВЛЕНО
         val categoryCombo = JComboBox(manager.categories.map { it.name }.toTypedArray())
         val commentField = JTextField()
         val dateField = JTextField(LocalDate.now().format(dateFormatter))
@@ -741,10 +818,11 @@ class BudgetApp : JFrame()
         saveButton.addActionListener {
             try
             {
-                val amount = amountField.text.toDoubleOrNull()
-                if (amount == null || amount <= 0)
+                // использование умного ввода суммы
+                val amount = parseAmount(amountField.text)
+                if (amount <= 0)
                 {
-                    JOptionPane.showMessageDialog(dialog, "Введите корректную сумму > 0", "Ошибка", JOptionPane.ERROR_MESSAGE)
+                    JOptionPane.showMessageDialog(dialog, "Введите корректную сумму > 0\nПримеры: 1500, 1.5к, 2т", "Ошибка", JOptionPane.ERROR_MESSAGE)
                     return@addActionListener
                 }
 
