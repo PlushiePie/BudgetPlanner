@@ -370,3 +370,133 @@ class BudgetApp : JFrame()
         dialog.add(buttonPanel, BorderLayout.SOUTH)
         dialog.isVisible = true
     }
+
+    //диалог аналитики
+    private fun showAnalyticsDialog()
+    {
+        val dialog = JDialog(this, "📈 Прогнозы и аналитика", true)
+        dialog.setSize(500, 500)
+        dialog.setLocationRelativeTo(this)
+        dialog.layout = BorderLayout()
+
+        val mainPanel = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            border = EmptyBorder(20, 20, 20, 20)
+        }
+
+        val titleLabel = JLabel("📊 Анализ ваших трат").apply {
+            font = Font("Arial", Font.BOLD, 18)
+            alignmentX = java.awt.Component.CENTER_ALIGNMENT
+        }
+        mainPanel.add(titleLabel)
+        mainPanel.add(Box.createVerticalStrut(20))
+
+        // 1. Средние траты
+        val avgDay = manager.getAverageSpentPerDay()
+        val avgWeek = manager.getAverageSpentPerWeek()
+        val avgMonth = manager.getAverageSpentPerMonth()
+
+        val avgPanel = JPanel(GridLayout(3, 1, 5, 5)).apply {
+            border = BorderFactory.createTitledBorder("📅 Средние траты")
+            add(JLabel("  • В день: ${String.format("%.2f", avgDay)} ₽"))
+            add(JLabel("  • В неделю: ${String.format("%.2f", avgWeek)} ₽"))
+            add(JLabel("  • В месяц: ${String.format("%.2f", avgMonth)} ₽"))
+        }
+        mainPanel.add(avgPanel)
+        mainPanel.add(Box.createVerticalStrut(15))
+
+        // 2. Самая затратная категория
+        val mostExpensive = manager.getMostExpensiveCategory()
+        val mostExpensivePanel = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            border = BorderFactory.createTitledBorder("🏆 Самая затратная категория")
+        }
+
+        if (mostExpensive != null && mostExpensive.second > 0) {
+            val percentage = manager.getCategoryPercentage(mostExpensive.first)
+            val category = manager.categories.find { it.name == mostExpensive.first }
+            mostExpensivePanel.add(JLabel("  ${category?.icon ?: "📌"} ${mostExpensive.first}"))
+            mostExpensivePanel.add(JLabel("  Потрачено: ${String.format("%.2f", mostExpensive.second)} ₽"))
+            mostExpensivePanel.add(JLabel("  Доля от всех трат: ${String.format("%.1f", percentage)}%"))
+        } else
+        {
+            mostExpensivePanel.add(JLabel("Нет данных о тратах"))
+        }
+        mainPanel.add(mostExpensivePanel)
+        mainPanel.add(Box.createVerticalStrut(15))
+
+        // 3. Прогноз на конец месяца
+        val forecast = manager.getMonthEndForecast()
+        val totalBudget = manager.getTotalBudget()
+        val totalSpent = manager.getTotalSpent()
+
+        val forecastPanel = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            border = BorderFactory.createTitledBorder("Прогноз на конец месяца")
+        }
+
+        val forecastColor = when
+        {
+            forecast > 0 -> Color.GREEN
+            forecast < 0 -> Color.RED
+            else -> Color.GRAY
+        }
+
+        val remainingPanel = JPanel().apply {
+            layout = BorderLayout()
+            add(JLabel("  Остаток бюджета сейчас: "), BorderLayout.WEST)
+            add(JLabel("${String.format("%.2f", totalBudget - totalSpent)} ₽").apply {
+                font = Font("Arial", Font.BOLD, 14)
+            }, BorderLayout.EAST)
+        }
+
+        val forecastResultPanel = JPanel().apply {
+            layout = BorderLayout()
+            add(JLabel("  Прогнозируемый остаток: "), BorderLayout.WEST)
+            add(JLabel("${String.format("%.2f", forecast)} ₽").apply {
+                font = Font("Arial", Font.BOLD, 14)
+                foreground = forecastColor
+            }, BorderLayout.EAST)
+        }
+
+        val statusLabel = when
+        {
+            forecast > 5000 -> JLabel("✅ Отлично, вы уложитесь в бюджет с запасом")
+            forecast > 0 -> JLabel("👍 Хорошо, вы уложитесь в бюджет")
+            forecast > -5000 -> JLabel("⚠️ Внимание! Возможно небольшое превышение бюджета")
+            else -> JLabel("🔴 Критично! Серьёзное превышение бюджета")
+        }
+
+        forecastPanel.add(remainingPanel)
+        forecastPanel.add(forecastResultPanel)
+        forecastPanel.add(Box.createVerticalStrut(10))
+        forecastPanel.add(statusLabel)
+
+        mainPanel.add(forecastPanel)
+        mainPanel.add(Box.createVerticalStrut(15))
+
+        // 4. Доп. статистика
+        val statsPanel = JPanel(GridLayout(0, 1, 5, 5)).apply {
+            border = BorderFactory.createTitledBorder("📊 Дополнительная статистика")
+        }
+
+        val totalTransactions = manager.transactions.size
+        val avgTransaction = if (totalTransactions > 0) totalSpent / totalTransactions else 0.0
+        val daysWithTransactions = manager.transactions.map { it.date }.distinct().size
+
+        statsPanel.add(JLabel("  • Всего трат: $totalTransactions"))
+        statsPanel.add(JLabel("  • Средний чек: ${String.format("%.2f", avgTransaction)} ₽"))
+        statsPanel.add(JLabel("  • Дней с тратами: $daysWithTransactions"))
+
+        mainPanel.add(statsPanel)
+
+        val closeButton = JButton("Закрыть")
+        closeButton.addActionListener { dialog.dispose() }
+
+        val scrollPane = JScrollPane(mainPanel)
+        scrollPane.verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
+
+        dialog.add(scrollPane, BorderLayout.CENTER)
+        dialog.add(closeButton, BorderLayout.SOUTH)
+        dialog.isVisible = true
+    }
