@@ -120,7 +120,6 @@ class BudgetManager : Serializable
             val proportion = _categories[i].budget / currentTotal
             var newBudget = totalAmount * proportion
 
-            // Для последней категории ставим остаток, чтобы избежать погрешности
             if (i == _categories.size - 1)
             {
                 newBudget = remainingBudget
@@ -134,3 +133,77 @@ class BudgetManager : Serializable
 
     fun getTotalBudget(): Double = _categories.sumOf { it.budget }
     fun getTotalSpent(): Double = _categories.sumOf { it.spent }
+
+    //методы для аналитики
+    fun getAverageSpentPerDay(): Double
+    {
+        if (_transactions.isEmpty()) return 0.0
+        val firstDate = _transactions.minByOrNull { it.date }?.date ?: return 0.0
+        val lastDate = _transactions.maxByOrNull { it.date }?.date ?: return 0.0
+        val days = ChronoUnit.DAYS.between(firstDate, lastDate).toDouble() + 1
+        return if (days > 0) getTotalSpent() / days else 0.0
+    }
+
+    fun getAverageSpentPerWeek(): Double = getAverageSpentPerDay() * 7
+    fun getAverageSpentPerMonth(): Double = getAverageSpentPerDay() * 30.44
+
+    fun getMostExpensiveCategory(): Pair<String, Double>?
+    {
+        if (_categories.isEmpty()) return null
+        return _categories.maxByOrNull { it.spent }?.let { it.name to it.spent }
+    }
+
+    fun getCategoryPercentage(categoryName: String): Double
+    {
+        val total = getTotalSpent()
+        if (total == 0.0) return 0.0
+        val category = _categories.find { it.name == categoryName }
+        return (category?.spent ?: 0.0) / total * 100
+    }
+
+    fun getMonthEndForecast(): Double
+    {
+        val today = LocalDate.now()
+        val daysLeftInMonth = ChronoUnit.DAYS.between(today, today.withDayOfMonth(today.lengthOfMonth())).toDouble() + 1
+        val avgPerDay = getAverageSpentPerDay()
+        val projectedSpending = avgPerDay * daysLeftInMonth
+        val remainingBudget = getTotalBudget() - getTotalSpent()
+        return remainingBudget - projectedSpending
+    }
+
+    private fun saveToFile()
+    {
+        try {
+            val data = BudgetSaveData(_categories, _transactions)
+            ObjectOutputStream(FileOutputStream(SAVE_FILE)).use { it.writeObject(data) }
+        } catch (e: Exception)
+        {
+            println("Ошибка сохранения: ${e.message}")
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun loadFromFile()
+    {
+        val file = File(SAVE_FILE)
+        if (!file.exists()) return
+
+        try {
+            ObjectInputStream(FileInputStream(file)).use { input ->
+                val data = input.readObject() as BudgetSaveData
+                _categories.clear()
+                _categories.addAll(data.categories)
+                _transactions.clear()
+                _transactions.addAll(data.transactions)
+            }
+        } catch (e: Exception)
+        {
+            println("Ошибка загрузки: ${e.message}")
+        }
+    }
+}
+
+data class BudgetSaveData(
+    val categories: List<Category>,
+    val transactions: List<Transaction>
+) : Serializable
