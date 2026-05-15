@@ -31,7 +31,13 @@ data class Transaction(
     var isCompleted: Boolean = false
 ) : Serializable
 
-//менеджер бюджета
+data class Saving(
+    val name: String,
+    var targetAmount: Double,
+    var currentAmount: Double,
+    val icon: String
+) : Serializable
+
 class BudgetManager : Serializable
 {
     private companion object
@@ -41,9 +47,11 @@ class BudgetManager : Serializable
 
     private val _categories = mutableListOf<Category>()
     private val _transactions = mutableListOf<Transaction>()
+    private val _savings = mutableListOf<Saving>()
 
     val categories: List<Category> get() = _categories
     val transactions: List<Transaction> get() = _transactions
+    val savings: List<Saving> get() = _savings
 
     init
     {
@@ -113,7 +121,6 @@ class BudgetManager : Serializable
         val currentTotal = getTotalBudget()
         if (currentTotal == 0.0) return
 
-        val remainingCategories = _categories.toMutableList()
         var remainingBudget = totalAmount
 
         for (i in _categories.indices)
@@ -132,10 +139,55 @@ class BudgetManager : Serializable
         saveToFile()
     }
 
+    // Сбережения
+    fun addSaving(name: String, targetAmount: Double, icon: String)
+    {
+        if (targetAmount <= 0 || name.isEmpty()) return
+        _savings.add(Saving(name, targetAmount, 0.0, icon))
+        saveToFile()
+    }
+
+    fun addToSaving(savingName: String, amount: Double)
+    {
+        if (amount <= 0) return
+        val index = _savings.indexOfFirst { it.name == savingName }
+        if (index != -1)
+        {
+            val newAmount = _savings[index].currentAmount + amount
+            _savings[index] = _savings[index].copy(currentAmount = newAmount)
+            saveToFile()
+        }
+    }
+
+    fun deleteSaving(index: Int)
+    {
+        if (index in _savings.indices)
+        {
+            _savings.removeAt(index)
+            saveToFile()
+        }
+    }
+
+    fun updateSavingTarget(index: Int, newTarget: Double)
+    {
+        if (index in _savings.indices && newTarget > 0)
+        {
+            _savings[index] = _savings[index].copy(targetAmount = newTarget)
+            saveToFile()
+        }
+    }
+
+    // Поиск по комментариям
+    fun searchTransactionsByComment(searchText: String): List<Transaction>
+    {
+        if (searchText.isEmpty()) return _transactions
+        return _transactions.filter { it.comment.contains(searchText, ignoreCase = true) }
+    }
+
     fun getTotalBudget(): Double = _categories.sumOf { it.budget }
     fun getTotalSpent(): Double = _categories.sumOf { it.spent }
 
-    //методы для аналитики
+    // Аналитика
     fun getAverageSpentPerDay(): Double
     {
         if (_transactions.isEmpty()) return 0.0
@@ -175,7 +227,7 @@ class BudgetManager : Serializable
     private fun saveToFile()
     {
         try {
-            val data = BudgetSaveData(_categories, _transactions)
+            val data = BudgetSaveData(_categories, _transactions, _savings)
             ObjectOutputStream(FileOutputStream(SAVE_FILE)).use { it.writeObject(data) }
         } catch (e: Exception)
         {
@@ -196,6 +248,8 @@ class BudgetManager : Serializable
                 _categories.addAll(data.categories)
                 _transactions.clear()
                 _transactions.addAll(data.transactions)
+                _savings.clear()
+                _savings.addAll(data.savings)
             }
         } catch (e: Exception)
         {
@@ -206,7 +260,8 @@ class BudgetManager : Serializable
 
 data class BudgetSaveData(
     val categories: List<Category>,
-    val transactions: List<Transaction>
+    val transactions: List<Transaction>,
+    val savings: List<Saving> = emptyList()
 ) : Serializable
 
 class BudgetApp : JFrame()
@@ -239,14 +294,13 @@ class BudgetApp : JFrame()
     {
         title = "Планировщик трат — Бюджетирование"
         defaultCloseOperation = EXIT_ON_CLOSE
-        setSize(650, 750)
+        setSize(750, 850)
         setLocationRelativeTo(null)
 
         setupUI()
         refreshAll()
     }
 
-    // умный ввод суммы (1.5к → 1500, 2т → 2000)
     private fun parseAmount(input: String): Double
     {
         val trimmed = input.trim().lowercase()
@@ -257,7 +311,6 @@ class BudgetApp : JFrame()
         }
     }
 
-    // экспорт в CSV
     private fun exportToCSV()
     {
         if (manager.transactions.isEmpty())
@@ -276,6 +329,241 @@ class BudgetApp : JFrame()
             }
         }
         JOptionPane.showMessageDialog(this, "Отчёт сохранён в ${file.absolutePath}")
+    }
+
+    private fun showSearchDialog()
+    {
+        val searchText = JOptionPane.showInputDialog(this, "Введите текст для поиска в комментариях:", "Поиск по комментариям", JOptionPane.QUESTION_MESSAGE)
+        if (searchText.isNullOrBlank()) return
+
+        val results = manager.searchTransactionsByComment(searchText)
+        if (results.isEmpty())
+        {
+            JOptionPane.showMessageDialog(this, "Ничего не найдено по запросу \"$searchText\"", "Результаты поиска", JOptionPane.INFORMATION_MESSAGE)
+            return
+        }
+
+        val dialog = JDialog(this, "🔍 Результаты поиска: \"$searchText\"", true)
+        dialog.setSize(600, 400)
+        dialog.setLocationRelativeTo(this)
+
+        val model = DefaultListModel<String>()
+        val list = JList(model)
+        list.font = Font("Monospaced", Font.PLAIN, 12)
+
+        for (t in results)
+        {
+            val commentStr = if (t.comment.isNotEmpty()) t.comment else "без комментария"
+            model.addElement("${t.date.format(dateFormatter)} | ${t.amount.toInt()} ₽ | ${t.category} | Комментарий: $commentStr")
+        }
+
+        dialog.add(JScrollPane(list), BorderLayout.CENTER)
+        val closeButton = JButton("Закрыть")
+        closeButton.addActionListener { dialog.dispose() }
+        dialog.add(closeButton, BorderLayout.SOUTH)
+        dialog.setSize(500, 400)
+        dialog.isVisible = true
+    }
+
+    // удаление сбережения (правый клик)
+    private fun showSavingsDialog()
+    {
+        val dialog = JDialog(this, "💰 Сбережения", true)
+        dialog.setSize(500, 400)
+        dialog.setLocationRelativeTo(this)
+        dialog.layout = BorderLayout()
+
+        val panel = JPanel()
+        panel.layout = BoxLayout(panel, BoxLayout.Y_AXIS)
+        panel.border = EmptyBorder(10, 10, 10, 10)
+
+        val savingsList = manager.savings
+        if (savingsList.isEmpty())
+        {
+            panel.add(JLabel("Нет добавленных целей сбережений."))
+            panel.add(JLabel("Нажмите 'Добавить цель' в меню."))
+        }
+        else
+        {
+            // используется список с возможностью удаления
+            val listModel = DefaultListModel<String>()
+            val list = JList(listModel)
+            list.font = Font("Arial", Font.PLAIN, 12)
+            list.fixedCellHeight = 60
+
+            for ((idx, saving) in savingsList.withIndex())
+            {
+                val percent = ((saving.currentAmount / saving.targetAmount) * 100).coerceAtMost(100.0).toInt()
+                listModel.addElement("${saving.icon} ${saving.name}  |  ${saving.currentAmount.toInt()} / ${saving.targetAmount.toInt()} ₽  |  $percent%")
+            }
+
+            list.addMouseListener(object : java.awt.event.MouseAdapter()
+            {
+                override fun mouseClicked(e: java.awt.event.MouseEvent)
+                {
+                    if (e.button == java.awt.event.MouseEvent.BUTTON3)
+                    {
+                        val index = list.locationToIndex(e.point)
+                        if (index != -1)
+                        {
+                            val popup = JPopupMenu()
+                            val deleteItem = JMenuItem("🗑️ Удалить цель сбережения")
+                            deleteItem.addActionListener {
+                                val confirm = JOptionPane.showConfirmDialog(dialog,
+                                    "Удалить цель \"${savingsList[index].name}\"?",
+                                    "Подтверждение удаления",
+                                    JOptionPane.YES_NO_OPTION)
+                                if (confirm == JOptionPane.YES_OPTION)
+                                {
+                                    manager.deleteSaving(index)
+                                    dialog.dispose()
+                                    showSavingsDialog()
+                                    refreshAll()
+                                }
+                            }
+                            popup.add(deleteItem)
+                            popup.show(list, e.x, e.y)
+                        }
+                    }
+                }
+            })
+
+            val scrollPane = JScrollPane(list)
+            scrollPane.preferredSize = Dimension(450, 300)
+            panel.add(scrollPane)
+        }
+
+        val scrollPane = JScrollPane(panel)
+        dialog.add(scrollPane, BorderLayout.CENTER)
+
+        val buttonPanel = JPanel()
+        val closeButton = JButton("Закрыть")
+        closeButton.addActionListener { dialog.dispose() }
+        buttonPanel.add(closeButton)
+        dialog.add(buttonPanel, BorderLayout.SOUTH)
+
+        dialog.setSize(500, 400)
+        dialog.isVisible = true
+    }
+
+    private fun showAddSavingDialog()
+    {
+        val dialog = JDialog(this, "➕ Добавить цель сбережения", true)
+        dialog.setSize(350, 250)
+        dialog.setLocationRelativeTo(this)
+        dialog.layout = BorderLayout()
+
+        val panel = JPanel().apply {
+            layout = GridLayout(0, 2, 10, 10)
+            border = EmptyBorder(20, 20, 20, 20)
+        }
+
+        panel.add(JLabel("💰 Название цели:"))
+        val nameField = JTextField()
+        panel.add(nameField)
+
+        panel.add(JLabel("🎯 Целевая сумма (₽):"))
+        val targetField = JTextField()
+        panel.add(targetField)
+
+        panel.add(JLabel("😊 Иконка (эмодзи):"))
+        val iconField = JTextField("💰")
+        panel.add(iconField)
+
+        val buttonPanel = JPanel()
+        val saveButton = JButton("💾 Сохранить")
+        val cancelButton = JButton("❌ Отмена")
+
+        saveButton.addActionListener {
+            val name = nameField.text.trim()
+            val target = targetField.text.toDoubleOrNull()
+            val icon = iconField.text.trim().ifEmpty { "💰" }
+
+            if (name.isEmpty())
+            {
+                JOptionPane.showMessageDialog(dialog, "Введите название цели", "Ошибка", JOptionPane.ERROR_MESSAGE)
+                return@addActionListener
+            }
+            if (target == null || target <= 0)
+            {
+                JOptionPane.showMessageDialog(dialog, "Введите корректную сумму > 0", "Ошибка", JOptionPane.ERROR_MESSAGE)
+                return@addActionListener
+            }
+
+            manager.addSaving(name, target, icon)
+            dialog.dispose()
+            JOptionPane.showMessageDialog(this, "Цель сбережения добавлена!")
+        }
+
+        cancelButton.addActionListener { dialog.dispose() }
+
+        buttonPanel.add(saveButton)
+        buttonPanel.add(cancelButton)
+
+        dialog.add(panel, BorderLayout.CENTER)
+        dialog.add(buttonPanel, BorderLayout.SOUTH)
+        dialog.isVisible = true
+    }
+
+    private fun showAddToSavingDialog()
+    {
+        if (manager.savings.isEmpty())
+        {
+            JOptionPane.showMessageDialog(this, "Сначала добавьте цель сбережения через меню", "Ошибка", JOptionPane.WARNING_MESSAGE)
+            return
+        }
+
+        val dialog = JDialog(this, "➕ Пополнить сбережение", true)
+        dialog.setSize(350, 200)
+        dialog.setLocationRelativeTo(this)
+        dialog.layout = BorderLayout()
+
+        val panel = JPanel().apply {
+            layout = GridLayout(0, 2, 10, 10)
+            border = EmptyBorder(20, 20, 20, 20)
+        }
+
+        panel.add(JLabel("💰 Выберите цель:"))
+        val savingCombo = JComboBox(manager.savings.map { "${it.icon} ${it.name}" }.toTypedArray())
+        panel.add(savingCombo)
+
+        panel.add(JLabel("➕ Сумма пополнения (₽):"))
+        val amountField = JTextField()
+        panel.add(amountField)
+
+        val buttonPanel = JPanel()
+        val saveButton = JButton("💾 Пополнить")
+        val cancelButton = JButton("❌ Отмена")
+
+        saveButton.addActionListener {
+            val selected = savingCombo.selectedIndex
+            val amount = amountField.text.toDoubleOrNull()
+
+            if (selected == -1)
+            {
+                JOptionPane.showMessageDialog(dialog, "Выберите цель", "Ошибка", JOptionPane.ERROR_MESSAGE)
+                return@addActionListener
+            }
+            if (amount == null || amount <= 0)
+            {
+                JOptionPane.showMessageDialog(dialog, "Введите корректную сумму > 0", "Ошибка", JOptionPane.ERROR_MESSAGE)
+                return@addActionListener
+            }
+
+            val savingName = manager.savings[selected].name
+            manager.addToSaving(savingName, amount)
+            dialog.dispose()
+            JOptionPane.showMessageDialog(this, "Сбережение пополнено на $amount ₽")
+        }
+
+        cancelButton.addActionListener { dialog.dispose() }
+
+        buttonPanel.add(saveButton)
+        buttonPanel.add(cancelButton)
+
+        dialog.add(panel, BorderLayout.CENTER)
+        dialog.add(buttonPanel, BorderLayout.SOUTH)
+        dialog.isVisible = true
     }
 
     private fun setupUI()
@@ -330,9 +618,23 @@ class BudgetApp : JFrame()
         val analyticsItem = JMenuItem("📈 Прогнозы и аналитика")
         analyticsItem.addActionListener { showAnalyticsDialog() }
 
-        // пункт меню для экспорта в CSV
         val exportItem = JMenuItem("📤 Экспорт отчёта в CSV")
         exportItem.addActionListener { exportToCSV() }
+
+        val searchItem = JMenuItem("🔍 Поиск по комментариям")
+        searchItem.addActionListener { showSearchDialog() }
+
+        val savingsMenu = JMenu("💰 Сбережения")
+        val addSavingItem = JMenuItem("➕ Добавить цель сбережения")
+        addSavingItem.addActionListener { showAddSavingDialog() }
+        val viewSavingsItem = JMenuItem("📋 Просмотреть сбережения")
+        viewSavingsItem.addActionListener { showSavingsDialog() }
+        val addToSavingItem = JMenuItem("➕ Пополнить сбережение")
+        addToSavingItem.addActionListener { showAddToSavingDialog() }
+
+        savingsMenu.add(addSavingItem)
+        savingsMenu.add(viewSavingsItem)
+        savingsMenu.add(addToSavingItem)
 
         val exitItem = JMenuItem("🚪 Выход")
         exitItem.addActionListener { dispose() }
@@ -344,6 +646,9 @@ class BudgetApp : JFrame()
         actionsMenu.addSeparator()
         actionsMenu.add(analyticsItem)
         actionsMenu.add(exportItem)
+        actionsMenu.add(searchItem)
+        actionsMenu.addSeparator()
+        actionsMenu.add(savingsMenu)
         actionsMenu.addSeparator()
         actionsMenu.add(exitItem)
 
@@ -351,7 +656,7 @@ class BudgetApp : JFrame()
         val aboutItem = JMenuItem("О программе")
         aboutItem.addActionListener {
             JOptionPane.showMessageDialog(this,
-                "Планировщик трат\nВерсия 2.0\n\nФункции:\n- Добавление трат\n- Просмотр всех трат\n- Удаление трат\n- Отметка выполненных\n- Установка бюджета на месяц\n- Прогнозы и аналитика\n- Экспорт в CSV\n- Фильтр по дате\n- Умный ввод суммы\n- Автосохранение",
+                "Планировщик трат\nВерсия 2.0\n\nФункции:\n- Добавление трат\n- Просмотр всех трат\n- Удаление трат\n- Отметка выполненных\n- Установка бюджета на месяц\n- Прогнозы и аналитика\n- Экспорт в CSV\n- Фильтр по дате\n- Умный ввод суммы\n- Поиск по комментариям\n- Сбережения (цели накоплений)\n- Автосохранение",
                 "О программе", JOptionPane.INFORMATION_MESSAGE)
         }
         helpMenu.add(aboutItem)
@@ -409,7 +714,6 @@ class BudgetApp : JFrame()
         dialog.isVisible = true
     }
 
-    //диалог аналитики
     private fun showAnalyticsDialog()
     {
         val dialog = JDialog(this, "📈 Прогнозы и аналитика", true)
@@ -429,7 +733,6 @@ class BudgetApp : JFrame()
         mainPanel.add(titleLabel)
         mainPanel.add(Box.createVerticalStrut(20))
 
-        // 1. Средние траты
         val avgDay = manager.getAverageSpentPerDay()
         val avgWeek = manager.getAverageSpentPerWeek()
         val avgMonth = manager.getAverageSpentPerMonth()
@@ -443,7 +746,6 @@ class BudgetApp : JFrame()
         mainPanel.add(avgPanel)
         mainPanel.add(Box.createVerticalStrut(15))
 
-        // 2. Самая затратная категория
         val mostExpensive = manager.getMostExpensiveCategory()
         val mostExpensivePanel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
@@ -463,7 +765,6 @@ class BudgetApp : JFrame()
         mainPanel.add(mostExpensivePanel)
         mainPanel.add(Box.createVerticalStrut(15))
 
-        // 3. Прогноз на конец месяца
         val forecast = manager.getMonthEndForecast()
         val totalBudget = manager.getTotalBudget()
         val totalSpent = manager.getTotalSpent()
@@ -513,7 +814,6 @@ class BudgetApp : JFrame()
         mainPanel.add(forecastPanel)
         mainPanel.add(Box.createVerticalStrut(15))
 
-        // 4. Доп. статистика
         val statsPanel = JPanel(GridLayout(0, 1, 5, 5)).apply {
             border = BorderFactory.createTitledBorder("📊 Дополнительная статистика")
         }
@@ -539,7 +839,6 @@ class BudgetApp : JFrame()
         dialog.isVisible = true
     }
 
-    //контекстное меню для трат
     private fun showTransactionContextMenu(index: Int, x: Int, y: Int)
     {
         val popup = JPopupMenu()
@@ -561,7 +860,6 @@ class BudgetApp : JFrame()
         popup.show(recentList, x, y)
     }
 
-    // фильтр по дате в диалоге "Все траты"
     private fun showAllTransactionsDialog()
     {
         val dialog = JDialog(this, "📜 Все траты", true)
@@ -569,7 +867,6 @@ class BudgetApp : JFrame()
         dialog.setLocationRelativeTo(this)
         dialog.layout = BorderLayout()
 
-        // Панель фильтров
         val filterPanel = JPanel().apply {
             layout = FlowLayout(FlowLayout.LEFT)
             border = EmptyBorder(10, 10, 5, 10)
@@ -616,7 +913,6 @@ class BudgetApp : JFrame()
                         val popup = JPopupMenu()
                         val deleteItem = JMenuItem("🗑️ Удалить")
                         deleteItem.addActionListener {
-                            // Нужно найти реальный индекс в оригинальном списке
                             val now = LocalDate.now()
                             val filtered = when (filterCombo.selectedIndex) {
                                 1 -> manager.transactions.filter { it.date >= now.minusWeeks(1) }
@@ -780,7 +1076,6 @@ class BudgetApp : JFrame()
         }
     }
 
-    // умный ввод суммы используется в диалоге добавления
     private fun showAddDialog()
     {
         val dialog = JDialog(this, "➕ Добавить трату", true)
@@ -794,7 +1089,7 @@ class BudgetApp : JFrame()
         }
 
         val amountField = JTextField()
-        amountField.toolTipText = "Можно писать: 1500, 1.5к, 2т (к = тысячи)"  // ДОБАВЛЕНО
+        amountField.toolTipText = "Можно писать: 1500, 1.5к, 2т (к = тысячи)"
         val categoryCombo = JComboBox(manager.categories.map { it.name }.toTypedArray())
         val commentField = JTextField()
         val dateField = JTextField(LocalDate.now().format(dateFormatter))
@@ -818,7 +1113,6 @@ class BudgetApp : JFrame()
         saveButton.addActionListener {
             try
             {
-                // использование умного ввода суммы
                 val amount = parseAmount(amountField.text)
                 if (amount <= 0)
                 {
